@@ -1,0 +1,9 @@
+{
+  "name": "wide-splitters",
+  "version": "0.1.0",
+  "title": "Wide Splitters",
+  "author": "Catalyss",
+  "factorio_version": "2.1",
+  "dependencies": ["base >= 2.0.0", "? space-age >= 2.0.0"],
+  "description": "Splitters that are 3, 4, 5... belts wide (1xY), for every belt tier. Max width is a startup setting."
+}
