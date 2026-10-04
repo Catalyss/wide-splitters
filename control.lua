@@ -175,48 +175,54 @@ local function setup(carrier, info)
   return true
 end
 
-local function move_one(src, dst)
-  local items = src.get_detailed_contents()
-  local tries = 0
-  for i = #items, 1, -1 do
-    local it = items[i]
-    if dst.can_insert_at(it.position) then
-      local stack = it.stack
-      local spec = { name = stack.name, count = stack.count, quality = stack.quality.name }
-      if dst.insert_at(it.position, stack) then
-        if src.remove_item(spec) > 0 then return true end
-        dst.remove_item(spec) -- roll back if the source item could not be removed
-        return false
-      end
-    end
-    tries = tries + 1
-    if tries >= 4 then break end
-  end
-  return false
-end
-
-local function balance(rec)
+-- this is an attempt to copy the offsets from the vanilla splitter but honestly I have no idea.
+local function balance(rec, zone)
   local belts = rec.belts
   local w = #belts
+  rec.rr = rec.rr or { 1, 1 }
+
   for lane = 1, 2 do
-    local lines, counts = {}, {}
+    local lines, work = {}, {}
+
+    -- Collect freshly arrived items first, so an item we move is not handled twice.
     for i = 1, w do
       local b = belts[i]
       if not b.valid then return end
-      lines[i] = b.get_transport_line(lane)
-      counts[i] = lines[i].get_item_count()
-    end
-    for _ = 1, w do
-      local imax, imin = 1, 1
-      for i = 2, w do
-        if counts[i] > counts[imax] then imax = i end
-        if counts[i] < counts[imin] then imin = i end
+      local line = b.get_transport_line(lane)
+      lines[i] = line
+      if line.get_item_count() > 0 then
+        for _, it in ipairs(line.get_detailed_contents()) do
+          if it.position < zone then
+            work[#work + 1] = {
+              s = i,
+              position = it.position,
+              spec = { name = it.stack.name, count = it.stack.count,
+                       quality = it.stack.quality.name },
+            }
+          end
+        end
       end
-      if counts[imax] - counts[imin] < 2 then break end
-      if not move_one(lines[imax], lines[imin]) then break end
-      counts[imax] = counts[imax] - 1
-      counts[imin] = counts[imin] + 1
     end
+
+    local rr = rec.rr[lane]
+    for _, job in ipairs(work) do
+      for _ = 1, w do
+        local t = rr
+        rr = rr % w + 1
+        if t == job.s then
+          break -- item stays on its own belt; it used this turn
+        end
+        local dst = lines[t]
+        if dst.can_insert_at(job.position) and dst.insert_at(job.position, job.spec) then
+          if lines[job.s].remove_item(job.spec) > 0 then
+            break
+          end
+          dst.remove_item(job.spec) -- roll back, then try the next output
+        end
+        -- target full or failed: continue to the next belt in the cycle
+      end
+    end
+    rec.rr[lane] = rr
   end
 end
 
@@ -225,7 +231,11 @@ on_tick = function(event)
   local tick = event.tick
   for id, rec in pairs(storage.splitters) do
     if rec.carrier.valid and (tick + id) % interval == 0 then
-      balance(rec)
+      local b = rec.belts[1]
+      if b and b.valid then
+        local speed = b.prototype.belt_speed or 0.03125
+        balance(rec, math.min(1, speed * interval))
+      end
     end
   end
 end
